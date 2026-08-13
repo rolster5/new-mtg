@@ -21,8 +21,8 @@ CARDS_PER_PAGE = 48
 
 # Optional: direct URL to mtg_cards.db.gz (GitHub Release, Hugging Face, etc.)
 # Leave empty to only use a local file. Example:
-# DB_DOWNLOAD_URL = "https://github.com/rolster5/new-mtg/releases/download/v1/mtg_cards.db.gz"
-DB_DOWNLOAD_URL = "https://github.com/rolster5/new-mtg/releases/download/v1/mtg_cards.db.gz"
+# DB_DOWNLOAD_URL = "https://github.com/YOUR_USER/YOUR_REPO/releases/download/v1/mtg_cards.db.gz"
+DB_DOWNLOAD_URL = ""
 
 st.set_page_config(
     page_title="MTG Card Browser",
@@ -32,40 +32,87 @@ st.set_page_config(
 )
 
 
+def _is_sqlite_file(path: Path) -> bool:
+    """True if file starts with the SQLite magic header."""
+    try:
+        with open(path, "rb") as f:
+            return f.read(16).startswith(b"SQLite format 3")
+    except Exception:
+        return False
+
+
+def _is_gzip_file(path: Path) -> bool:
+    try:
+        with open(path, "rb") as f:
+            return f.read(2) == b"\x1f\x8b"
+    except Exception:
+        return False
+
+
+def _install_from_path(src: Path) -> bool:
+    """Copy or decompress src into DB_PATH."""
+    if _is_sqlite_file(src):
+        if src.resolve() != DB_PATH.resolve():
+            shutil.copy2(src, DB_PATH)
+        return _is_sqlite_file(DB_PATH)
+
+    if _is_gzip_file(src):
+        with gzip.open(src, "rb") as f_in, open(DB_PATH, "wb") as f_out:
+            shutil.copyfileobj(f_in, f_out)
+        return _is_sqlite_file(DB_PATH)
+
+    return False
+
+
 def ensure_database() -> bool:
     """Make sure mtg_cards.db exists. Returns True on success."""
-    if DB_PATH.exists() and DB_PATH.stat().st_size > 1_000_000:
+    if DB_PATH.exists() and _is_sqlite_file(DB_PATH) and DB_PATH.stat().st_size > 1_000_000:
         return True
 
-    # 1) Local .gz next to the app
+    # 1) Local uncompressed db already present but failed size check above
+    if DB_PATH.exists() and _is_sqlite_file(DB_PATH):
+        return True
+
+    # 2) Local .gz next to the app
     if DB_GZ_PATH.exists():
         with st.spinner("Unpacking card database..."):
-            with gzip.open(DB_GZ_PATH, "rb") as f_in, open(DB_PATH, "wb") as f_out:
-                shutil.copyfileobj(f_in, f_out)
-        if DB_PATH.exists():
-            return True
+            if _install_from_path(DB_GZ_PATH):
+                return True
 
-    # 2) Download from configured URL
+    # 3) Download from configured URL (accepts .db or .gz)
     if DB_DOWNLOAD_URL:
-        with st.spinner("Downloading card database (one-time, ~40 MB)..."):
+        with st.spinner("Downloading card database (one-time)..."):
+            tmp = APP_DIR / "_db_download.tmp"
             try:
-                urllib.request.urlretrieve(DB_DOWNLOAD_URL, DB_GZ_PATH)
-                with gzip.open(DB_GZ_PATH, "rb") as f_in, open(DB_PATH, "wb") as f_out:
-                    shutil.copyfileobj(f_in, f_out)
-                # Optional: remove gz to save space on the host
+                urllib.request.urlretrieve(DB_DOWNLOAD_URL, tmp)
+                if not _install_from_path(tmp):
+                    # Show a helpful hint about what we actually got
+                    head = tmp.read_bytes()[:20] if tmp.exists() else b""
+                    st.error(
+                        "Downloaded file is not a SQLite database or gzip archive. "
+                        f"First bytes: {head!r}"
+                    )
+                    return False
                 try:
-                    DB_GZ_PATH.unlink(missing_ok=True)
+                    tmp.unlink(missing_ok=True)
+                    if DB_GZ_PATH.exists():
+                        DB_GZ_PATH.unlink(missing_ok=True)
                 except Exception:
                     pass
-                return DB_PATH.exists()
+                return True
             except Exception as e:
                 st.error(f"Failed to download database: {e}")
                 return False
+            finally:
+                try:
+                    tmp.unlink(missing_ok=True)
+                except Exception:
+                    pass
 
     st.error(
         "Card database not found.\n\n"
         "Place `mtg_cards.db` or `mtg_cards.db.gz` next to `app.py`, "
-        "or set `DB_DOWNLOAD_URL` in app.py to a hosted `.gz` file."
+        "or set `DB_DOWNLOAD_URL` in app.py to a hosted `.db` / `.gz` file."
     )
     return False
 
