@@ -21,8 +21,8 @@ CARDS_PER_PAGE = 48
 
 # Optional: direct URL to mtg_cards.db.gz (GitHub Release, Hugging Face, etc.)
 # Leave empty to only use a local file. Example:
-# DB_DOWNLOAD_URL = "https://github.com/YOUR_USER/YOUR_REPO/releases/download/v1/mtg_cards.db.gz"
-DB_DOWNLOAD_URL = ""
+# DB_DOWNLOAD_URL = "https://github.com/rolster5/new-mtg/releases/download/v1/mtg_cards.db.gz"
+DB_DOWNLOAD_URL = "https://github.com/rolster5/new-mtg/releases/download/v1/mtg_cards.db.gz"
 
 st.set_page_config(
     page_title="MTG Card Browser",
